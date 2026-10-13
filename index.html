@@ -40,7 +40,13 @@
         const { url } = await (await fetch('url.json?' + Date.now(), { cache: 'no-store' })).json();
         const ctl = new AbortController();
         const timer = setTimeout(() => ctl.abort(), 6000);
-        const ok = await fetch(url + '/api/health', { mode: 'cors', signal: ctl.signal }).then((r) => r.ok).catch(() => false);
+        const get = (path) => fetch(url + path, { mode: 'cors', signal: ctl.signal });
+        // A server that lets this site call it: play right here (game/), on this
+        // address that never changes — saved results and streaks stay put.
+        const cfg = await get('/api/config').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (cfg && cfg.cors) { clearTimeout(timer); return location.replace('game/' + location.search); }
+        // An older server: go to it directly; nobody home: offline mode.
+        const ok = await get('/api/health').then((r) => r.ok).catch(() => false);
         clearTimeout(timer);
         if (!ok) return offline(); // the health check answers with CORS: no answer = down
         location.replace(url + '/' + location.search);

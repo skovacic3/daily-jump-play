@@ -558,7 +558,24 @@
     </div>
     <div class="tpad" id="tJump"><span>JUMP</span></div>
   </div>
-  <script src="game.js"></script>
+  <script>
+    // Which server to play with: the live one, if it answers and allows this site.
+    (async () => {
+      try {
+        const { url } = await (await fetch('../url.json?' + Date.now(), { cache: 'no-store' })).json();
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 5000);
+        const cfg = await (await fetch(url + '/api/config', { signal: ctl.signal })).json();
+        clearTimeout(timer);
+        window.DJ_API = cfg && cfg.cors ? url : null;
+      } catch {
+        window.DJ_API = null; // away (or not yet allowing this site): offline mode
+      }
+      const g = document.createElement('script');
+      g.src = 'game.js';
+      document.body.appendChild(g);
+    })();
+  </script>
   <script>
     // installable + playable offline (only when served over http(s), not from disk)
     if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('sw.js').catch(() => {});

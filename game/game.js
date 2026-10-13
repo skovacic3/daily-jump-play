@@ -2347,8 +2347,12 @@ function boot() {
   // Opened straight from disk, everything here quietly stays off.
   // A static copy (GitHub Pages — the permanent link's fallback while the server is
   // away) plays offline: rooms built here, results kept on this device, no boards.
+  // On Pages a small loader finds the live server first (window.DJ_API: its address, or
+  // null while it's away), so the app keeps one address — and players' saved results,
+  // streaks and identity with it — however often the server's own address changes.
   const STATIC_HOST = /\.github\.io$/.test(location.hostname || '');
-  const API = /^https?:$/.test(location.protocol) && !STATIC_HOST ? location.origin : null;
+  const API = typeof window.DJ_API === 'string' ? window.DJ_API
+    : /^https?:$/.test(location.protocol) && !STATIC_HOST ? location.origin : null;
   const PLAYER_KEY = 'daily-jump:player';
   let player = null;
   try { player = JSON.parse(localStorage.getItem(PLAYER_KEY)); } catch { /* none yet */ }
@@ -6065,7 +6069,7 @@ function boot() {
       <p class="sub">#${dayNum} · ${dateKey}</p>
       ${streakLine() ? `<p class="streak">${streakLine()}</p>` : ''}
       ${twistBanner()}
-      ${STATIC_HOST ? '<p class="twist">📡 Offline mode — the game server is away, so today\'s rooms are built on this device. Leaderboards are back soon.</p>' : ''}
+      ${STATIC_HOST && !API ? '<p class="twist">📡 Offline mode — the game server is away, so today\'s rooms are built on this device. Leaderboards are back soon.</p>' : ''}
       <p class="challenge" id="challenge" hidden></p>
       <p>Three rooms, one screen each.<br>Same rooms for everyone today.</p>
       <p class="keys"><kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move &nbsp; <kbd>Space</kbd> / <kbd>Z</kbd> jump &nbsp; <kbd>R</kbd> restart room &nbsp; <kbd>G</kbd> ghost &nbsp; <kbd>V</kbd> racers &nbsp; <kbd>M</kbd> sound &nbsp; <kbd>N</kbd> music</p>
