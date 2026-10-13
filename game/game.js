@@ -2750,6 +2750,7 @@ function boot() {
       },
       jump() { tone('square', 330, 560, 0.09, 0.12); },
       swap() { tone('triangle', 1320, 990, 0.05, 0.07, 0.01); },
+      near() { tone('sine', 1800, 2600, 0.06, 0.05); },
       wallKick() { tone('triangle', 420, 820, 0.1, 0.22); noise(0.05, 0.15, 2400); },
       cornerKick() { [880, 1175, 1568].forEach((f, k) => tone('triangle', f, f * 1.02, 0.12, 0.2, k * 0.045)); },
       badge() { [784, 988, 1175, 1568].forEach((f, k) => tone('triangle', f, f, 0.14, 0.14, k * 0.06)); },
@@ -3111,6 +3112,9 @@ function boot() {
     game.attemptGhost = game.ghostOn;
     game.attemptAssist = assist < 1;
     game.attemptFlag = !!f;
+    game.closeCalls = 0; // this attempt's close calls, for the rank card
+    game.nearCool = 0;
+    game.kickChain = 0;
     game.levelClock = f ? f.clock : 0; // saws back where they were, so the flag is as safe as when you stood there
     game.roomSteps = 0;
     game.roomStarted = false;
@@ -4016,6 +4020,17 @@ function boot() {
   // ---------- particles & gore ----------
   // A clear: confetti in the game's colours and a ring rippling out from the goal.
   const CONFETTI = ['#ffd166', '#ff8fa3', '#9ad1ff', '#7bd88f', '#c77dff'];
+  // A close call: in the air, alive, with a spike or saw within a few px.  Said at most
+  // once a second, and never while standing (a ledge beside spikes isn't a near miss).
+  const NEAR_PX = 5;
+  function nearMiss(p) {
+    if ((game.nearCool -= 1 / 120) > 0 || p.onGround || devState.god) return false;
+    const r = { x: p.x - NEAR_PX, y: p.y - NEAR_PX, w: p.w + 2 * NEAR_PX, h: p.h + 2 * NEAR_PX };
+    if (!hitsHazard(r, game.level, game.levelClock)) return false;
+    game.nearCool = 1;
+    return true;
+  }
+
   // Dust: a few soft puffs, sideways along the ground (dir 0) or away from a wall.
   function dust(x, y, dir, n) {
     if (reduceMotion) return;
@@ -4114,6 +4129,11 @@ function boot() {
         sfx.spring();
         burst(p.x + p.w / 2, p.y + p.h, 12, '#ffd166');
       }
+      if (p.landed) game.kickChain = 0;
+      if (p.wallJumped) {
+        game.kickChain = (game.kickChain || 0) + 1;
+        if (game.kickChain >= 3) game.popups.push({ text: `×${game.kickChain} wall kicks!`, x: p.x + p.w / 2, y: p.y - 14, life: 0.9, color: '#ffd166' });
+      }
       if (p.jumped) {
         game.squash = -0.8;
         if (p.cornerKicked) sfx.cornerKick();
@@ -4174,7 +4194,12 @@ function boot() {
         game.popups.push({ text: '✦ shard — now reach the goal', x: sh.x + sh.w / 2, y: sh.y - 6, life: 1.2, color: SHARD_GOLD });
       }
       if (!devState.god && hitsHazard(p, game.level, game.levelClock)) die();
-      else if (reachedGoal(p, game.level)) {
+      else if (nearMiss(p)) {
+        game.closeCalls++;
+        sfx.near();
+        game.popups.push({ text: 'close!', x: p.x + p.w / 2, y: p.y - 6, life: 0.7, color: '#9ad1ff' });
+      }
+      if (game.state === 'playing' && reachedGoal(p, game.level)) {
         if (game.attemptFlag) { // practice from a flag: no card, no best — straight back to the flag
           sfx.goal();
           celebrate(game.level.goal.x + 11, game.level.goal.y + 14);
@@ -5988,7 +6013,7 @@ function boot() {
       <div class="card-top">${game.levelIdx === BONUS_ROOM ? '☠ BONUS' : `ROOM ${game.levelIdx + 1}`} · ${game.level.cfg.name.toUpperCase()}${game.level.twist && TWISTS[game.level.twist] ? ` · ${TWISTS[game.level.twist].icon} ${TWISTS[game.level.twist].name.toUpperCase()}` : ''} · CLEAR</div>
       <pre class="rank-art${impossible ? ' glitch' : ''}" style="--rc:${c.rank.color}"></pre>
       <div class="card-time"><span class="big">${formatRoomTime(c.time)}</span>
-        <span class="card-sub">ghost ${formatRoomTime(ghostT)} · ×${(Math.round(c.time / DT) / Math.round(ghostT / DT)).toFixed(2)}${game.attemptAssist ? ' · 🐢 assisted' : ''}</span></div>
+        <span class="card-sub">ghost ${formatRoomTime(ghostT)} · ×${(Math.round(c.time / DT) / Math.round(ghostT / DT)).toFixed(2)}${game.attemptAssist ? ' · 🐢 assisted' : ''}${game.closeCalls ? ` · 😅 ${game.closeCalls} close call${game.closeCalls === 1 ? '' : 's'}` : ''}</span></div>
       <div class="card-best">${c.newBest ? `✨ NEW BEST${splitTag(c.time, c.prevBest)}` : best && best.time < c.time ? `best ${formatRoomTime(best.time)}${splitTag(c.time, best.time)}` : ''}${
         game.shardClear ? `<span class="card-shard">✦ SHARD${game.shardClear.first ? ' COLLECTED' : ''}</span>`
         : game.level.shard && !set.shards[game.levelIdx] ? '<span class="card-shard missed">✧ this room hides a shard</span>' : ''}</div>
