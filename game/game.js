@@ -675,7 +675,7 @@ function stepPlayer(p, input, level, dt) {
     const iy1 = Math.floor((p.y + p.h - 0.001) / TILE);
     solid = (cx, cy) => {
       const c = cellAt(level, cx, cy);
-      if (c === SOLID || c === SPRING) return true;
+      if (solidAt(level, cx, cy)) return true; // everything always solid (belts too), then…
       return c === on && !(cx >= ix0 && cx <= ix1 && cy >= iy0 && cy <= iy1);
     };
   }
@@ -2160,7 +2160,7 @@ function generateLevel(seed, levelIndex, twist = null) {
 // server stores each room once (serializeLevel) and everyone, forever after, plays
 // and is verified against that copy (deserializeLevel).  Bump GENERATOR_VERSION
 // whenever generation changes, so stored rows say which generator built them.
-const GENERATOR_VERSION = '2026-10-13.16'; // .1: safety pad; .2: no tame rooms/plain fallbacks; .3: timing tolerance; .4: shards; .5: dividers, switchbacks, min turns; .6: springs; .7: daily twists; .8: key & lock; .9: exact key heuristic, spring-only climb speed; .10: one-way planks; .11: no spikes on planks, exact plank resting; .12: updrafts; .13: more turns (2/3/4/4), never a straight room; .14: on/off switch blocks; .15: switch blocks steered onto the winning line; .16: conveyor belts
+const GENERATOR_VERSION = '2026-10-13.17'; // .1: safety pad; .2: no tame rooms/plain fallbacks; .3: timing tolerance; .4: shards; .5: dividers, switchbacks, min turns; .6: springs; .7: daily twists; .8: key & lock; .9: exact key heuristic, spring-only climb speed; .10: one-way planks; .11: no spikes on planks, exact plank resting; .12: updrafts; .13: more turns (2/3/4/4), never a straight room; .14: on/off switch blocks; .15: switch blocks steered onto the winning line; .16: conveyor belts; .17: belts solid in switch rooms too
 
 function serializeLevel(lv) {
   return {
