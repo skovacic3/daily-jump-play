@@ -96,13 +96,13 @@ const LEVELS = [
     goalHeightBias: 1.2,
   },
   {
-    name: 'Grinder', safetyPad: 6, tolerance: 0.2, dividers: [1, 2], minTurns: 3, springs: [1, 1], lockChance: 0.4, planks: 0.3, switchRooms: 0.35, beltRooms: 0.3, updrafts: [0, 1], routeSpikes: 11, routeSaws: 1, routeMargin: 9, chain: [3, 4], shaft: 1, goalMinHeight: 2, attempts: 24, minChunks: 26,
+    name: 'Grinder', safetyPad: 6, tolerance: 0.2, dividers: [1, 2], minTurns: 3, springs: [1, 1], lockChance: 0.4, planks: 0.3, switchRooms: 0.35, beltRooms: 0.3, towerRooms: 0.8, towerShelves: [2], minGhost: 2.5, updrafts: [0, 1], routeSpikes: 11, routeSaws: 1, routeMargin: 9, chain: [3, 4], shaft: 1, goalMinHeight: 2, attempts: 24, minChunks: 26,
     ledges: [5, 8], ledgeMax: 5, pillars: [2, 3], pits: [1, 3],
     topSpikes: 0.45, ceilSpikes: 3, wallSpikes: 2, saws: [1, 2],
     goalHeightBias: 1.8,
   },
   {
-    name: 'Gauntlet', safetyPad: 4, tolerance: 0.12, dividers: [2, 2], minTurns: 4, springs: [1, 2], lockChance: 0.5, planks: 0.3, switchRooms: 0.45, beltRooms: 0.35, updrafts: [1, 1], routeSpikes: 16, routeSaws: 2, routeMargin: 7, chain: [3, 5], shaft: 1, goalMinHeight: 2, attempts: 28, minChunks: 28,
+    name: 'Gauntlet', safetyPad: 4, tolerance: 0.12, dividers: [2, 2], minTurns: 4, springs: [1, 2], lockChance: 0.5, planks: 0.3, switchRooms: 0.45, beltRooms: 0.35, towerRooms: 0.85, towerShelves: [2], minGhost: 3, updrafts: [1, 1], routeSpikes: 16, routeSaws: 2, routeMargin: 7, chain: [3, 5], shaft: 1, goalMinHeight: 2, attempts: 28, minChunks: 28,
     ledges: [6, 9], ledgeMax: 4, pillars: [3, 4], pits: [2, 4],
     topSpikes: 0.6, ceilSpikes: 5, wallSpikes: 4, saws: [2, 3],
     goalHeightBias: 2.6,
@@ -114,7 +114,7 @@ const LEVELS = [
 // held to the same rules: proven beatable by the solver, no corner kick required.
 const BONUS_ROOM = 3;
 const BONUS = {
-  name: 'Nightmare', safetyPad: 3, dividers: [2, 2], minTurns: 4, springs: [1, 2], lockChance: 0.6, planks: 0.3, switchRooms: 0.5, beltRooms: 0.4, updrafts: [1, 2], routeSpikes: 24, routeSaws: 3, routeMargin: 5, chain: [4, 5], shaft: 1, goalMinHeight: 3, attempts: 28, minChunks: 28,
+  name: 'Nightmare', safetyPad: 3, dividers: [2, 2], minTurns: 4, springs: [1, 2], lockChance: 0.6, planks: 0.3, switchRooms: 0.5, beltRooms: 0.4, towerRooms: 0.85, towerShelves: [2], minGhost: 3, updrafts: [1, 2], routeSpikes: 24, routeSaws: 3, routeMargin: 5, chain: [4, 5], shaft: 1, goalMinHeight: 3, attempts: 28, minChunks: 28,
   ledges: [7, 10], ledgeMax: 4, pillars: [3, 5], pits: [3, 5],
   topSpikes: 0.75, ceilSpikes: 7, wallSpikes: 6, saws: [3, 4],
   goalHeightBias: 3.2,
@@ -473,7 +473,6 @@ const GHOST_COLORS = { body: '#9ad1ff', shade: '#74aedb', eye: '#ffffff', outlin
 const SHARD_GOLD = '#ffb547';
 const GOLD_COLORS = { body: '#ffd166', shade: '#d4a537', eye: '#3a2a00', outline: '#5c4300' };   // #1 of the day
 const CHALLENGE_COLORS = { body: '#c77dff', shade: '#9b5ad1', eye: '#1b1b2f', outline: '#3a1d5c' }; // a friend's challenge
-const SILVER_COLORS = { body: '#dfe3ee', shade: '#a9afbf', eye: '#1b1b2f', outline: '#3c4152' }; // the run just above yours
 
 // ============================================================
 // Player physics — ground jump, variable height, wall slide, wall jump
@@ -1266,7 +1265,7 @@ function finishRoom(grid, saws, spawn, goal, cfg, levelIndex, seed, twist = null
   };
 }
 
-function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = false, belty = false) {
+function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = false, belty = false, tower = 0) {
   const grid = new Uint8Array(COLS * ROWS);
   const at = (cx, cy) => (cx < 0 || cx >= COLS || cy < 0 || cy >= ROWS ? SOLID : grid[cy * COLS + cx]);
   const set = (cx, cy, v) => {
@@ -1296,11 +1295,42 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
     set(COLS - 1, cy, SOLID);
   }
 
+  // A tower (Spelunky-style: the critical path first): full-width shelves split the
+  // room into tiers, each with its opening at the opposite end from the one below, so
+  // the only way up is a full run along every tier and a wall climb at its end — a
+  // switchback route by construction, never "a few jumps forward".
+  const shelves = [];
+  if (tower) {
+    // Tiers of 4 clear rows (rows 2..15 hold 3 tiers and 2 shelves): room to jump in.
+    const tierRows = Math.floor((FLOOR_ROW - TOP_ROW - tower) / (tower + 1));
+    let openRight = true; // the spawn is bottom-left: the first way up is far right
+    for (let k = 1; k <= tower; k++) {
+      const row = FLOOR_ROW - k * (tierRows + 1);
+      const o0 = openRight ? COLS - 4 : 1;
+      for (let cx = 1; cx < COLS - 1; cx++) if (cx < o0 || cx > o0 + 2) set(cx, row, SOLID);
+      shelves.push({ row, o0, o1: o0 + 2, openRight });
+      openRight = !openRight;
+    }
+    // Something to deal with on every tier: a block to hop or a short spike strip,
+    // well away from the openings (the hazard pass adds more along the route).
+    const floors = [FLOOR_ROW, ...shelves.map((sh) => sh.row)];
+    floors.forEach((f, k) => {
+      const lo = k === 0 ? 6 : 4;
+      const n = ri(1, 2);
+      for (let h = 0; h < n; h++) {
+        const cx = ri(lo, COLS - 6);
+        if (at(cx, f) !== SOLID || at(cx, f - 1) !== EMPTY) continue;
+        if (rng() < 0.5) set(cx, f - 1, SOLID);
+        else for (let x = cx; x < cx + 2 && at(x, f) === SOLID && at(x, f - 1) === EMPTY; x++) set(x, f - 1, SPIKE_UP);
+      }
+    });
+  }
+
   // Dividers: walls that block the straight line to the goal — one rising from the
   // floor (climb it: wall kicks), the next hanging from the ceiling (duck under), so
   // the way through snakes like a hand-built Meat Boy room instead of a staircase.
   const barriers = [];
-  if (cfg.dividers) {
+  if (cfg.dividers && !tower) {
     const nb = ri(cfg.dividers[0], cfg.dividers[1]);
     let fromFloor = true;
     for (let k = 0; k < nb; k++) {
@@ -1318,7 +1348,7 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
     }
   }
   // Spike pits in the floor.
-  const pits = fewer(ri(cfg.pits[0], cfg.pits[1]));
+  const pits = tower ? 0 : fewer(ri(cfg.pits[0], cfg.pits[1])); // a tower's floor is a tier: no blind pits
   for (let i = 0; i < pits; i++) {
     const w = ri(1, 3);
     const x0 = ri(7, COLS - 3 - w);
@@ -1344,7 +1374,7 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
   // random instead leaves isolated perches nothing can reach, and the goal then
   // settles back down near the floor and the room becomes "hold right".
   let chainTop = FLOOR_ROW;
-  {
+  if (!tower) {
     let dir = rng() < 0.5 ? 1 : -1;
     const flipAt = ri(1, 2); // a switchback: the climb turns back on itself
     let cx = dir > 0 ? ri(3, 8) : ri(COLS - 9, COLS - 4);
@@ -1364,7 +1394,7 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
   // A wall-jump chimney: two pillars a couple of tiles apart that you climb by
   // alternating kicks.  Their tops are standing surfaces, so the shaft doubles as a
   // route to a high goal.  No cap on top — that would trap you inside it.
-  if (cfg.shaft) {
+  if (cfg.shaft && !tower) {
     for (let tries = 0; tries < 80; tries++) {
       const gap = ri(2, 3);
       const h = ri(5, 9);
@@ -1431,7 +1461,7 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
   }
 
   // Free-floating pillars: a gap on each side and underneath, so both faces kick.
-  const wantPillars = ri(cfg.pillars[0], cfg.pillars[1]);
+  const wantPillars = tower ? 0 : ri(cfg.pillars[0], cfg.pillars[1]); // a pillar would wall off a tower's tier
   let pillarsMade = 0;
   for (let tries = 0; tries < 400 && pillarsMade < wantPillars; tries++) {
     const h = ri(3, 7);
@@ -1454,7 +1484,7 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
   }
 
   // Ceiling spikes.
-  let ceil = fewer(cfg.ceilSpikes);
+  let ceil = tower ? 0 : fewer(cfg.ceilSpikes); // nor spikes hung under the shelves
   for (let tries = 0; tries < 400 && ceil > 0; tries++) {
     const cx = ri(2, COLS - 3);
     const cy = ri(TOP_ROW, FLOOR_ROW - 2);
@@ -1554,6 +1584,8 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
   };
   const keptSaws = saws.filter((s) => !onSpawn(s));
 
+  if (tower) return finishTower(grid, keptSaws, spawn, updrafts, shelves, cfg, rng, levelIndex, seed, twist, switchy);
+
   // Candidate goal spots: a standing surface with two clear rows above it, far from
   // spawn, biased upward by difficulty.  Requiring both rows clear also guarantees
   // the goal marker can never overlap a spike, since it sits inside this one column.
@@ -1627,6 +1659,114 @@ function buildRoom(rng, cfg, levelIndex, seed, relax, twist = null, switchy = fa
   return null;
 }
 
+// A tower room's goal and route.  The goal sits at the far end of the top tier from
+// where you come up; the route is proved tier by tier — spawn → past the first
+// opening → past the next → … → goal — so a long zig-zag never runs the search out of
+// budget the way one blind spawn-to-goal search would.
+const TOWER_SEG_BUDGET = 8000;
+function finishTower(grid, saws, spawn, updrafts, shelves, cfg, rng, levelIndex, seed, twist, switchy) {
+  const at = (cx, cy) => (cx < 0 || cx >= COLS || cy < 0 || cy >= ROWS ? SOLID : grid[cy * COLS + cx]);
+  // The openings stay open: nothing scattered later may plug one, or hang spikes on
+  // the wall you climb through it.
+  for (const sh of shelves) {
+    for (let cy = sh.row - 3; cy <= sh.row + 3; cy++) {
+      for (let cx = sh.o0 - 1; cx <= sh.o1 + 1; cx++) {
+        if (cx <= 0 || cx >= COLS - 1 || cy <= CEIL_ROW || cy >= FLOOR_ROW) continue;
+        if (cy === sh.row && cx >= sh.o0 && cx <= sh.o1) { grid[cy * COLS + cx] = EMPTY; continue; }
+        if (cy !== sh.row && (isSpike(at(cx, cy)) || cx >= sh.o0 && cx <= sh.o1)) grid[cy * COLS + cx] = EMPTY;
+      }
+    }
+  }
+  // …and no saw sweeps the way up: its whole path near an opening (the step, the hole,
+  // the landing beyond) would seal the tier's only exit.
+  saws = saws.filter((sw) => !shelves.some((sh) => {
+    const x0 = (sh.o0 - 4) * TILE, x1 = (sh.o1 + 2) * TILE, y0 = (sh.row - 3) * TILE, y1 = (sh.row + 4) * TILE;
+    return Math.max(sw.x0, sw.x1) + sw.r > x0 && Math.min(sw.x0, sw.x1) - sw.r < x1 && Math.max(sw.y0, sw.y1) + sw.r > y0 && Math.min(sw.y0, sw.y1) - sw.r < y1;
+  }));
+  // A step under every opening, against the wall: hop onto it, then jump up through
+  // the hole — a tier is taller than a jump from its floor.
+  shelves.forEach((sh, k) => {
+    const below = k === 0 ? FLOOR_ROW : shelves[k - 1].row;
+    const stepRow = sh.row + 2;
+    if (stepRow > below - 1) return;
+    const sx = sh.openRight ? sh.o1 - 1 : sh.o0;
+    // in a switch room the step is a red or blue block: the climb itself is the puzzle
+    // (not solid when you get there? hop in place to swap it)
+    const tile = switchy ? (rng() < 0.5 ? SWITCH_A : SWITCH_B) : SOLID;
+    for (let cx = sx; cx < sx + 2; cx++) grid[stepRow * COLS + cx] = tile;
+  });
+  const top = shelves[shelves.length - 1];
+  // Goal: on the top shelf, as far from its opening as there's a clear spot.
+  const cols = top.openRight ? [2, 3, 4, 5, 6, 7, 8] : [COLS - 3, COLS - 4, COLS - 5, COLS - 6, COLS - 7, COLS - 8, COLS - 9];
+  const gc = cols.find((cx) => at(cx, top.row) === SOLID && at(cx, top.row - 1) === EMPTY && at(cx, top.row - 2) === EMPTY);
+  if (gc === undefined) return null;
+  const goal = { x: gc * TILE + (TILE - 22) / 2, y: top.row * TILE - 34, w: 22, h: 34 };
+  const room = finishRoom(grid, saws, spawn, goal, cfg, levelIndex, seed, twist);
+  if (updrafts.length) room.updrafts = updrafts;
+  // Waypoints, per tier: on the step under the opening, then on the shelf just past it.
+  const stand = (cx, row) => ({ x: cx * TILE, y: row * TILE - PLAYER_H - 4, w: 2 * TILE, h: PLAYER_H + 4 });
+  const marks = shelves.flatMap((sh, k) => {
+    const below = k === 0 ? FLOOR_ROW : shelves[k - 1].row;
+    const onShelf = { ...stand(sh.openRight ? sh.o0 - 2 : sh.o1 + 1, sh.row), exitOf: k }; // the way out of tier k
+    return sh.row + 2 <= below - 1 ? [{ ...stand(sh.openRight ? sh.o1 - 1 : sh.o0, sh.row + 2), exitOf: k }, onShelf] : [onShelf];
+  });
+  room.towerShelves = shelves; // generation-time only (never stored): keys and shards
+  room.towerWps = marks;        // splice their own waypoints into this chain
+  const chain = (pad, kicks) => chainSolve(room, marks, pad, kicks);
+  const fair = chain(cfg.safetyPad, false);
+  if (!fair) return null;
+  const before = traceRoute(room, fair);
+  if (!before) return null;
+  room.bot = { chunks: fair.length, time: fair.length * CHUNK_T, expanded: 0, tower: shelves.length };
+  room.goalRank = 0;
+  const savedGrid = room.grid.slice();
+  const savedSaws = room.saws.slice();
+  const keepClear = (cx, cy) =>
+    (cx <= 3 && cy >= FLOOR_ROW - 3) ||
+    (cx === gc && (cy === top.row - 1 || cy === top.row - 2)) ||
+    shelves.some((sh) => cx >= sh.o0 - 1 && cx <= sh.o1 + 1 && Math.abs(cy - sh.row) <= 3);
+  room.routeHazards = decorateRoute(room, before.rects, rng, cfg, keepClear);
+  room.noCornerKick = true;
+  if (!traceRoute(room, fair)) {
+    room.grid = savedGrid;
+    room.saws = savedSaws;
+    room.botMask = buildBotMask(savedSaws);
+    room.routeHazards = { spikes: 0, saws: 0, reverted: true };
+  }
+  room.fairRoute = fair;
+  const ghost = chain(0, true); // the ghost: real hitbox, corner kicks allowed
+  room.searchPad = 0;
+  room.noCornerKick = false;
+  room.route = ghost && ghost.length <= fair.length ? ghost : fair;
+  return room;
+}
+
+// Proves a route through the given waypoints in order, then to the goal; null if any
+// stretch can't be done.  (A locked goal's last stretch needs the key in hand.)
+function chainSolve(room, wps, pad, kicks) {
+  room.searchPad = pad;
+  room.noCornerKick = !kicks;
+  const p = makePlayer(room.spawn);
+  p.jumpHeldPrev = false;
+  const actions = [];
+  for (const target of [...wps, null]) {
+    const sol = solveRoom(room, TOWER_SEG_BUDGET, target ? { start: p, goal: target } : { start: p });
+    if (!sol.ok || !runChunks(room, p, sol.actions)) return null;
+    actions.push(...sol.actions);
+  }
+  return !room.key || p.hasKey ? actions : null;
+}
+// Which tier a row is in (0 = bottom), and where in the waypoint chain that tier ends.
+function towerTier(room, cy) {
+  let t = 0;
+  while (t < room.towerShelves.length && cy < room.towerShelves[t].row) t++;
+  return t;
+}
+function towerSplice(room, t, rect) {
+  const at = room.towerWps.findIndex((w) => w.exitOf === t); // before the tier's way out (top tier: before the goal)
+  return at < 0 ? [...room.towerWps, rect] : [...room.towerWps.slice(0, at), rect, ...room.towerWps.slice(at)];
+}
+
 // A plain staircase with no hazards. Only used if the generator somehow can't
 // produce a room that the solver clears — the day still gets a playable level.
 function fallbackRoom(cfg, levelIndex, seed, twist = null) {
@@ -1697,10 +1837,112 @@ const KEY_SIZE = 20;
 const KEY_TRIES = 4;
 const KEY_LEG_BUDGET = 9000;
 
+// Spots off a tower's line, inside a tier: open, clear of spikes and saw sweeps, the
+// given distance from the route — best first.
+function towerSpots(room, size, dMin, dMax, extra, rng) {
+  const trace = traceRoute(room, room.fairRoute);
+  if (!trace) return [];
+  const nearSpike = (cx, cy) => {
+    for (let y = cy - 1; y <= cy + 1; y++) for (let x = cx - 1; x <= cx + 1; x++) if (isSpike(cellAt(room, x, y))) return true;
+    return false;
+  };
+  const out = [];
+  for (let cy = TOP_ROW; cy < FLOOR_ROW; cy++) {
+    for (let cx = 2; cx < COLS - 2; cx++) {
+      if (cellAt(room, cx, cy) !== EMPTY || nearSpike(cx, cy) || (room.botMask && room.botMask[cy * COLS + cx])) continue;
+      if (room.towerShelves.some((sh) => sh.row === cy)) continue;
+      const rect = { x: cx * TILE + (TILE - size) / 2, y: cy * TILE + (TILE - size) / 2, w: size, h: size };
+      if (!extra(rect)) continue;
+      const d = gapToRoute(rect, trace.rects);
+      if (d < dMin || d > dMax) continue;
+      out.push({ rect, cy, score: d * 0.5 + rng() * 40 });
+    }
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+function placeShardTower(room, seed) {
+  const rng = mulberry32((seed ^ 0x5a4d) >>> 0);
+  const saved = { pad: room.searchPad, kick: room.noCornerKick };
+  room.searchPad = room.cfg.safetyPad;
+  room.noCornerKick = true;
+  try {
+    const spots = towerSpots(room, SHARD_SIZE, 60, 240, (r) => rectGap(r, room.goal) >= 60 && (!room.key || rectGap(r, room.key) >= 60), rng);
+    for (const c of spots.slice(0, SHARD_TRIES)) {
+      const actions = chainSolve(room, towerSplice(room, towerTier(room, c.cy), c.rect), room.cfg.safetyPad, false);
+      if (!actions || !shardBeforeGoal(room, actions, c.rect)) continue;
+      room.shard = c.rect;
+      room.shardRoute = actions;
+      return;
+    }
+  } finally {
+    room.searchPad = saved.pad;
+    room.noCornerKick = saved.kick;
+  }
+}
+// The route really grabs the shard before it finishes the room: a shard the line
+// reaches only by passing through the goal (say, beyond it on the top tier) would end
+// the room first in a real run.
+function shardBeforeGoal(room, actions, shard) {
+  const p = makePlayer(room.spawn);
+  p.jumpHeldPrev = false;
+  let held = false;
+  for (const ai of actions) {
+    const [dir, jump] = BOT_ACTIONS[ai];
+    const input = { left: dir < 0, right: dir > 0, jumpHeld: jump === 1, jumpPressed: jump === 1 && !p.jumpHeldPrev };
+    for (let st = 0; st < CHUNK_STEPS; st++) {
+      stepPlayer(p, input, room, DT);
+      input.jumpPressed = false;
+      if (overlaps(p, shard)) held = true;
+      if (reachedGoal(p, room)) return held;
+    }
+    p.jumpHeldPrev = jump === 1;
+  }
+  return false;
+}
+
+// A tower's key: off the line in some tier, so the climb takes a detour for it.
+function placeKeyTower(room, seed, rng) {
+  const cfg = room.cfg;
+  const saved = { route: room.route, fairRoute: room.fairRoute, ghostTime: room.ghostTime, bot: room.bot, pad: room.searchPad, kick: room.noCornerKick, wps: room.towerWps };
+  room.searchPad = cfg.safetyPad;
+  room.noCornerKick = true;
+  const spawnRect = { x: room.spawn.x, y: room.spawn.y, w: PLAYER_W, h: PLAYER_H };
+  // (a tier is only 4 rows tall: 45 px off the line is already a jump of its own)
+  const spots = towerSpots(room, KEY_SIZE, 45, 300, (r) => rectGap(r, room.goal) >= 150 && rectGap(r, spawnRect) >= 90, rng);
+  for (const c of spots.slice(0, KEY_TRIES)) {
+    room.key = c.rect;
+    const wps = towerSplice(room, towerTier(room, c.cy), c.rect);
+    const fair = chainSolve(room, wps, cfg.safetyPad, false);
+    if (!fair) continue;
+    room.fairRoute = fair;
+    room.towerWps = wps;
+    room.bot = { ...saved.bot, chunks: fair.length, time: fair.length * CHUNK_T };
+    room.searchPad = cfg.safetyPad;
+    room.noCornerKick = true;
+    if (cfg.tolerance && toleranceOf(room, (seed ^ 0x7015) >>> 0) < cfg.tolerance) continue;
+    const ghost = chainSolve(room, wps, 0, true);
+    room.searchPad = 0;
+    room.noCornerKick = false;
+    room.route = ghost && ghost.length <= fair.length ? ghost : fair;
+    room.ghostTime = ghostTimeOf(room);
+    if (!(room.ghostTime > 0)) continue;
+    return; // locked
+  }
+  room.key = null;
+  room.route = saved.route;
+  room.fairRoute = saved.fairRoute;
+  room.ghostTime = saved.ghostTime;
+  room.bot = saved.bot;
+  room.towerWps = saved.wps;
+  room.searchPad = saved.pad;
+  room.noCornerKick = saved.kick;
+}
+
 function placeKey(room, seed) {
   const cfg = room.cfg;
   const rng = mulberry32((seed ^ 0x6b3e) >>> 0);
   if (!cfg.lockChance || rng() >= cfg.lockChance || !room.fairRoute) return;
+  if (room.towerWps) { placeKeyTower(room, seed, rng); return; }
   const saved = { route: room.route, fairRoute: room.fairRoute, ghostTime: room.ghostTime, bot: room.bot, pad: room.searchPad, kick: room.noCornerKick };
   room.searchPad = cfg.safetyPad;
   room.noCornerKick = true;
@@ -1851,6 +2093,7 @@ function runChunks(level, p, actions) {
 
 function placeShard(room, seed) {
   if (!room.fairRoute) return;
+  if (room.towerWps) { placeShardTower(room, seed); return; }
   const rng = mulberry32((seed ^ 0x5a4d) >>> 0);
   const savedPad = room.searchPad;
   const savedKick = room.noCornerKick;
@@ -1973,9 +2216,10 @@ function switchifyRoute(room) {
         }
         let x0 = cx;
         let x1 = cx;
-        while (cellAt(room, x0 - 1, cy) === SOLID) x0--;
-        while (cellAt(room, x1 + 1, cy) === SOLID) x1++;
-        if (x1 - x0 + 1 > 6 || x0 <= 0 || x1 >= COLS - 1 || !free(x0 - 1, cy) || !free(x1 + 1, cy)) continue;
+        // (bounded: outside the room reads as solid, so a run reaching a wall would never end)
+        while (x0 > 1 && cellAt(room, x0 - 1, cy) === SOLID) x0--;
+        while (x1 < COLS - 2 && cellAt(room, x1 + 1, cy) === SOLID) x1++;
+        if (x1 - x0 + 1 > 6 || x0 <= 1 || x1 >= COLS - 2 || !free(x0 - 1, cy) || !free(x1 + 1, cy)) continue;
         const cells = [];
         let ok = true;
         for (let x = x0; x <= x1; x++) {
@@ -1992,7 +2236,7 @@ function switchifyRoute(room) {
       if (cx <= 0 || cx >= COLS - 1 || cellAt(room, cx, cy) !== SOLID) continue;
       let y0 = cy;
       let y1 = cy;
-      while (cellAt(room, cx, y0 - 1) === SOLID) y0--;
+      while (y0 - 1 > CEIL_ROW && cellAt(room, cx, y0 - 1) === SOLID) y0--;
       while (cellAt(room, cx, y1 + 1) === SOLID && y1 + 1 < FLOOR_ROW) y1++;
       if (y1 - y0 + 1 > 5 || y0 <= TOP_ROW || !free(cx, y0 - 1)) continue;
       const cells = [];
@@ -2094,10 +2338,15 @@ function generateLevel(seed, levelIndex, twist = null) {
   // every rejected try would fall back to a plain room and they'd almost never ship.
   const switchy = !!cfg.switchRooms && mulberry32((seed ^ 0x5e1c4) >>> 0)() < cfg.switchRooms;
   const belty = !!cfg.beltRooms && mulberry32((seed ^ 0xbe17) >>> 0)() < cfg.beltRooms;
+  const towerRng = mulberry32((seed ^ 0x70e4) >>> 0);
+  const tower = cfg.towerRooms && towerRng() < cfg.towerRooms ? cfg.towerShelves[Math.floor(towerRng() * cfg.towerShelves.length)] : 0;
   for (let attempt = 0; attempt < cfg.attempts; attempt++) {
     const relax = attempt / cfg.attempts;
     const rng = mulberry32((seed ^ Math.imul(attempt + 1, 0x9e3779b1)) >>> 0);
-    const room = buildRoom(rng, cfg, levelIndex, seed, relax, twist, switchy, belty);
+    // a classic room that still hasn't come out long enough by half its attempts turns
+    // into a tower for the rest: from the Grinder on, no room ships as a few jumps
+    const towerNow = tower || (cfg.towerRooms && attempt >= Math.floor(cfg.attempts / 2) ? cfg.towerShelves[0] : 0);
+    const room = buildRoom(rng, cfg, levelIndex, seed, relax, twist, switchy, belty, towerNow);
     if (!room) { lastReason = 'no-reachable-goal'; continue; }
     // The ghost's line must win under the *real* physics (corner kicks on): a fair
     // route proven with them off can brush a ledge corner, trigger one by accident and
@@ -2110,15 +2359,18 @@ function generateLevel(seed, levelIndex, twist = null) {
     // The spare (shipped if every attempt is turned down) also favours turny routes —
     // but counting turns costs a whole extra solve, so cheap rejects go first.
     const keepSpare = (turns) => {
-      const merit = lined + room.bot.chunks / 4 + turns * 6 + (room.switches ? Math.min(3, switchLandings(room)) * 5 : 0);
+      const merit = lined + room.bot.chunks / 4 + turns * 6 + room.ghostTime * 4 + (room.switches ? Math.min(3, switchLandings(room)) * 5 : 0);
       if (!spare || merit > spare.merit) spare = { room, merit, attempt };
     };
     if (room.bot.chunks < floor) { keepSpare(0); lastReason = 'too-easy'; continue; }
+    // "Not a few jumps forward": from the Grinder on, the fastest route must take a while.
+    if (cfg.minGhost && relax < 0.6 && room.ghostTime < cfg.minGhost) { keepSpare(0); lastReason = 'too-short'; continue; }
     // A route lined with far fewer hazards than the room asked for makes a soft "hard
     // room" (it happens when the geometry leaves no room for them): try again while
     // there are attempts to spare.
     if (relax < 0.7 && lined < 0.7 * (cfg.routeSpikes + cfg.routeSaws)) { keepSpare(0); lastReason = 'too-tame'; continue; }
-    const turns = turnsOf(room);
+    // a tower winds by construction: a reversal and a climb per tier, no search needed
+    const turns = room.bot.tower ? 2 * room.bot.tower + 2 : turnsOf(room);
     keepSpare(turns);
     // "Not just straight jumps": the fastest route must turn back or wall-kick enough.
     // The bar eases as attempts run out, but never below one turn.
@@ -2128,7 +2380,7 @@ function generateLevel(seed, levelIndex, twist = null) {
     // enough (cfg.tolerance) while attempts remain.  The bonus room has no such floor.
     // An on/off room whose winning route never lands on a red or blue block only has
     // them as scenery: try again while attempts remain.
-    if (room.switches && relax < 0.7 && !switchLandings(room) && !switchifyRoute(room)) { lastReason = 'switches-unused'; continue; }
+    if (room.switches && !room.bot.tower && relax < 0.7 && !switchLandings(room) && !switchifyRoute(room)) { lastReason = 'switches-unused'; continue; } // (a tower's switch blocks are its climbing steps)
     if (cfg.tolerance && relax < 0.7 && toleranceOf(room, (seed ^ 0x7015) >>> 0) < cfg.tolerance) { lastReason = 'fragile'; continue; }
     room.bot.attempt = attempt;
     if (room.switches && !switchLandings(room)) switchifyRoute(room); // late attempts: still try to use them
@@ -2160,7 +2412,7 @@ function generateLevel(seed, levelIndex, twist = null) {
 // server stores each room once (serializeLevel) and everyone, forever after, plays
 // and is verified against that copy (deserializeLevel).  Bump GENERATOR_VERSION
 // whenever generation changes, so stored rows say which generator built them.
-const GENERATOR_VERSION = '2026-10-13.17'; // .1: safety pad; .2: no tame rooms/plain fallbacks; .3: timing tolerance; .4: shards; .5: dividers, switchbacks, min turns; .6: springs; .7: daily twists; .8: key & lock; .9: exact key heuristic, spring-only climb speed; .10: one-way planks; .11: no spikes on planks, exact plank resting; .12: updrafts; .13: more turns (2/3/4/4), never a straight room; .14: on/off switch blocks; .15: switch blocks steered onto the winning line; .16: conveyor belts; .17: belts solid in switch rooms too
+const GENERATOR_VERSION = '2026-10-13.18'; // .1: safety pad; .2: no tame rooms/plain fallbacks; .3: timing tolerance; .4: shards; .5: dividers, switchbacks, min turns; .6: springs; .7: daily twists; .8: key & lock; .9: exact key heuristic, spring-only climb speed; .10: one-way planks; .11: no spikes on planks, exact plank resting; .12: updrafts; .13: more turns (2/3/4/4), never a straight room; .14: on/off switch blocks; .15: switch blocks steered onto the winning line; .16: conveyor belts; .17: belts solid in switch rooms too; .18: tower rooms (switchback tiers) + minimum route time
 
 function serializeLevel(lv) {
   return {
@@ -2784,7 +3036,7 @@ function boot() {
   // Audio may only start inside a real user activation: on touch screens that's the
   // pointerup/click, not the pointerdown, so listen for all of them.
   for (const ev of ['pointerdown', 'pointerup', 'click']) window.addEventListener(ev, () => sfx.wake(), true);
-  window.addEventListener('pointerdown', () => { if (game.state === 'swarm') endSwarm(); }); // a tap skips the replay
+  window.addEventListener('pointerdown', () => { if (game.state === 'swarm') endSwarm(); else if (game.state === 'watch') endWatch(); }); // a tap skips the replay
   window.addEventListener('keydown', (e) => {
     sfx.wake();
     if (e.code === 'KeyM' && !e.repeat && !(e.target && e.target.tagName === 'INPUT')) sfx.toggle();
@@ -2797,11 +3049,11 @@ function boot() {
       if (e.code === 'Escape') { endlessQuit(); return; }
     }
     if (game.state === 'endlessWait' && e.code === 'Escape') { endlessQuit(); return; }
-    if (game.state === 'swarm') {
+    if (game.state === 'swarm' || game.state === 'watch') {
       // any *game* key skips; shortcuts, modifiers, Tab and M (mute) pass through
       const mod = e.metaKey || e.ctrlKey || e.altKey || /^(Shift|Control|Alt|Meta|Tab|KeyM|KeyN)/.test(e.code);
       if (mod) return;
-      if (!e.repeat) endSwarm();
+      if (!e.repeat) (game.state === 'watch' ? endWatch : endSwarm)();
       if (KEYMAP[e.code] || e.code === 'Enter' || e.code === 'Escape') e.preventDefault();
       return;
     }
@@ -2823,7 +3075,6 @@ function boot() {
     if (e.code === 'Escape' && game.state === 'archive') archiveBack();
     if (e.code === 'KeyG' && !e.repeat && inRun()) toggleGhost();
     if (e.code === 'KeyF' && !e.repeat) plantFlag();
-    if (e.code === 'KeyV' && !e.repeat && inRun()) toggleRacers();
     if (dev && !e.repeat) devKey(e);
     if ((e.code === 'Enter' || e.code === 'Space') && game.state === 'title' && !e.repeat) startRun(game.practice);
   });
@@ -2951,6 +3202,8 @@ function boot() {
       }
     } else if (game.state === 'swarm') {
       if (gp.buttons.some((b, i) => pressed(i))) endSwarm();
+    } else if (game.state === 'watch') {
+      if (gp.buttons.some((b, i) => pressed(i))) endWatch();
     } else if (game.state === 'endlessOver') {
       if (pressed(0) || pressed(9)) startEndless(game.endlessReturn);
       else if (pressed(1)) endlessQuit();
@@ -2965,7 +3218,6 @@ function boot() {
       if (jump && !prev.jump) { jumpQueued = true; keys.jump = true; }
       if ((pressed(3) || pressed(8)) && game.state === 'playing') die();
       if (pressed(2) && inRun()) toggleGhost();
-      if (pressed(4) && inRun()) toggleRacers();
       if (pressed(5)) plantFlag(); // RB
       if (pressed(9) && solo() && inRun()) leaveSolo(null); // Start = back out of a retry / past level
     }
@@ -3485,12 +3737,9 @@ function boot() {
   }
 
   // ---------- racers ----------
-  // Other players' verified runs, raced live: 👑 the day's fastest, ⚔ the run just
-  // above yours, and your own best.  They set off on your first input, so the race
-  // is fair to the step — whoever touches the goal first was faster.  V toggles.
-  const RACERS_KEY = 'daily-jump:racers';
-  let racersOn = true;
-  try { racersOn = localStorage.getItem(RACERS_KEY) !== '0'; } catch { /* default on */ }
+  // While you play, the only other runner is a friend's challenge (?vs=): you opened
+  // their link to race them.  The day's fastest runs are watched after a clear instead
+  // (👑 spectate below) — racing ghosts on the playfield was too distracting.
   const racerCache = new Map(); // "date/room" -> Promise<racers response | null>
   game.racers = [];
 
@@ -3525,26 +3774,13 @@ function boot() {
 
   function loadRacers() {
     game.racers = [];
-    if (game.mode === 'endless' || game.mode === 'tutorial') return;
+    if (game.mode === 'endless' || game.mode === 'tutorial' || set !== today || !vsId) return;
     const lv = game.level;
-    const key = `${set.date}/${game.levelIdx}`;
-    let pr = API ? racerCache.get(key) : Promise.resolve(null);
-    if (!pr) {
-      const idx = game.levelIdx;
-      pr = Promise.all([
-        api('GET', `/api/racers/${key}`).catch(() => { racerCache.delete(key); return null; }), // a blip isn't cached
-        set === today ? vsData : Promise.resolve(null),
-      ]).then(([r, vs]) => {
-        const mineVs = vs && vs.rooms.find((x) => x.room === idx);
-        if (!r && !mineVs) return null;
-        return { ...(r || {}), vs: mineVs ? { ...mineVs, name: vs.name } : null };
-      });
-      racerCache.set(key, pr);
-    }
-    const idxNow = game.levelIdx;
-    pr.then((r) => {
+    const idx = game.levelIdx;
+    vsData.then((vs) => {
       if (game.level !== lv) return; // moved on while we waited
-      r = r || {};
+      const mine = vs && vs.rooms.find((x) => x.room === idx);
+      const r = { vs: mine ? { ...mine, name: vs.name } : null };
       const out = [];
       const add = (e, label, colors, alpha) => {
         const masks = e && decodeReplay(e.replay);
@@ -3553,10 +3789,6 @@ function boot() {
         while (start < masks.length && masks[start] === 0) start++; // idle before the first input
         out.push({ label: `${label} ${formatRoomTime(e.time)}`, colors, alpha, masks, start });
       };
-      if (r.top && !r.top.me) add(r.top, `👑 ${r.top.name}`, GOLD_COLORS, 0.6);
-      if (r.rival) add(r.rival, `⚔ ${r.rival.name}`, SILVER_COLORS, 0.6);
-      if (r.mine) add(r.mine, r.top && r.top.me ? '👑 your best' : 'your best', playerColors(), 0.35);
-      else { const pb = localPB(idxNow); if (pb) add(pb, 'your best', playerColors(), 0.35); } // offline / not on the server yet
       if (r.vs && vsId !== (player && player.id)) add(r.vs, `⚔ ${r.vs.name}`, CHALLENGE_COLORS, 0.7); // not your own link
       if (!out.length) return;
       game.racers = out;
@@ -3587,7 +3819,7 @@ function boot() {
 
   // Bodies go under the player; name tags (tags = true) go on top of everything.
   function drawRacers(tags = false) {
-    if (!racersOn || !game.racers.length) return;
+    if (!game.racers.length) return;
     ctx.save();
     ctx.font = '700 11px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
@@ -3615,12 +3847,77 @@ function boot() {
     ctx.restore();
   }
 
-  function toggleRacers() {
-    racersOn = !racersOn;
-    try { localStorage.setItem(RACERS_KEY, racersOn ? '1' : '0'); } catch { /* session only */ }
-    const p = game.player;
-    const msg = !racersOn ? 'racers off' : game.racers.length ? 'racers on' : 'racers on — nobody to race in this room yet';
-    game.popups.push({ text: msg, x: p.x + p.w / 2, y: p.y - 10, life: 1.2, color: '#ffffff' });
+  // ---------- 👑 spectate ----------
+  // After a clear: watch the day's fastest run of a room (or, offline, your own best),
+  // played back in the room on its own — no racing, just the line to learn from.
+  function fastestRun(i) {
+    const key = `${set.date}/${i}`;
+    let pr = API ? racerCache.get(key) : null;
+    if (API && !pr) {
+      pr = api('GET', `/api/racers/${key}`).catch(() => { racerCache.delete(key); return null; }); // a blip isn't cached
+      racerCache.set(key, pr);
+    }
+    return Promise.resolve(pr).then((r) => {
+      const top = r && r.top;
+      const masks = top && decodeReplay(top.replay);
+      if (masks) return { label: `👑 ${top.me ? 'you' : top.name} · ${formatRoomTime(top.time)}`, masks };
+      const pb = localPB(i);
+      const own = pb && decodeReplay(pb.replay);
+      return own ? { label: `your best · ${formatRoomTime(pb.time)}`, masks: own } : null;
+    });
+  }
+  // queue: [{ i, run }]; back: where to return to.
+  function startWatch(queue, back) {
+    hideOverlay();
+    ghostBtn.hidden = true;
+    game.watch = { queue, k: -1, back };
+    nextWatch();
+  }
+  function nextWatch() {
+    const w = game.watch;
+    w.k++;
+    if (w.k >= w.queue.length) { endWatch(); return; }
+    const { i, run } = w.queue[w.k];
+    game.levelIdx = i;
+    game.level = set === today ? roomAt(i) : set.rooms[i];
+    let start = 0;
+    while (start < run.masks.length && run.masks[start] === 0) start++; // idle before the first input
+    Object.assign(w, { run, i: start, p: makePlayer(game.level.spawn), clock: 0, end: 0, done: false });
+    game.levelClock = 0;
+    game.state = 'watch';
+  }
+  function stepWatch(dt) {
+    const w = game.watch;
+    if (w.done) { if ((w.end += dt) > 1.1) nextWatch(); return; }
+    w.clock += dt;
+    game.levelClock = w.clock; // saws exactly where they were for that run
+    const m = w.run.masks[w.i++];
+    if (m === undefined) { w.done = true; return; }
+    stepPlayer(w.p, { left: (m & 1) !== 0, right: (m & 2) !== 0, jumpHeld: (m & 4) !== 0, jumpPressed: (m & 8) !== 0 }, game.level, dt);
+    if (reachedGoal(w.p, game.level)) { w.done = true; celebrate(game.level.goal.x + 11, game.level.goal.y + 14); sfx.goal(); }
+  }
+  function endWatch() {
+    const w = game.watch;
+    if (!w) return;
+    game.watch = null;
+    w.back();
+  }
+  function drawWatch() {
+    const w = game.watch;
+    const p = w.p;
+    ctx.save();
+    drawClawd(p.x + p.w / 2, p.y + p.h, p.facing, p.onGround ? 'stand' : 'air', GOLD_COLORS, 1, 1, p.clinging);
+    const msg = `${w.run.label}${w.queue.length > 1 ? ` · room ${w.queue[w.k].i + 1}` : ''} · any key to stop`;
+    ctx.font = '700 14px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    const tw = ctx.measureText(msg).width + 24;
+    roundRect(VIEW_W / 2 - tw / 2, 40, tw, 24, 12);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(msg, VIEW_W / 2, 45);
+    ctx.restore();
   }
 
   // Updrafts: a soft column of light with streaks drifting upward.
@@ -4209,6 +4506,8 @@ function boot() {
       }
     } else if (game.state === 'swarm') {
       stepSwarm(dt);
+    } else if (game.state === 'watch') {
+      stepWatch(dt);
     } else if (game.state === 'dying') {
       if (game.runClockOn) game.time += dt;
       game.stateTimer -= dt;
@@ -5781,6 +6080,7 @@ function boot() {
     if (game.ghostOn && game.ghost && game.state === 'playing') drawGhost(game.ghost);
     if (game.state === 'playing') drawRacers();
     if (game.state === 'swarm') drawSwarm();
+    else if (game.state === 'watch') drawWatch();
     else if (game.player && game.state !== 'dying') drawPlayer(game.player);
     if (game.state === 'playing') drawRacers(true);
 
@@ -6023,6 +6323,7 @@ function boot() {
       <div class="card-crowd" id="cardCrowd"></div>
       <div class="card-btns">
         ${solo() ? '<button id="cardRetry" class="secondary">Retry <kbd>R</kbd></button>' : ''}
+        ${game.mode !== 'endless' && game.mode !== 'tutorial' ? '<button id="cardWatch" class="secondary">👑 Watch the fastest run</button>' : ''}
         ${game.tries.length > 1 ? `<button id="cardReplay" class="secondary">▶ Replay ${game.triesTotal > game.tries.length ? `last ${game.tries.length}` : `all ${game.tries.length}`} <kbd>P</kbd></button>` : ''}
         <button id="cardNext">${primary} <kbd>Enter</kbd></button>
       </div>`;
@@ -6031,6 +6332,18 @@ function boot() {
     overlay.querySelector('#cardNext').addEventListener('click', armed(cardNext));
     const rb = overlay.querySelector('#cardRetry');
     if (rb) rb.addEventListener('click', armed(cardRetry));
+    const wb = overlay.querySelector('#cardWatch');
+    if (wb) {
+      wb.addEventListener('click', armed(() => {
+        const i = game.levelIdx;
+        wb.disabled = true;
+        fastestRun(i).then((run) => {
+          if (game.state !== 'rankCard' || game.levelIdx !== i) return;
+          if (!run) { wb.textContent = '👑 no runs to watch yet'; return; }
+          startWatch([{ i, run }], () => { game.state = 'rankCard'; showRankCard(true); });
+        });
+      }));
+    }
     const pb = overlay.querySelector('#cardReplay');
     if (pb) pb.addEventListener('click', armed(startSwarm));
 
@@ -6097,7 +6410,7 @@ function boot() {
       ${STATIC_HOST && !API ? '<p class="twist">📡 Offline mode — the game server is away, so today\'s rooms are built on this device. Leaderboards are back soon.</p>' : ''}
       <p class="challenge" id="challenge" hidden></p>
       <p>Three rooms, one screen each.<br>Same rooms for everyone today.</p>
-      <p class="keys"><kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move &nbsp; <kbd>Space</kbd> / <kbd>Z</kbd> jump &nbsp; <kbd>R</kbd> restart room &nbsp; <kbd>G</kbd> ghost &nbsp; <kbd>V</kbd> racers &nbsp; <kbd>M</kbd> sound &nbsp; <kbd>N</kbd> music</p>
+      <p class="keys"><kbd>←</kbd><kbd>→</kbd> / <kbd>A</kbd><kbd>D</kbd> move &nbsp; <kbd>Space</kbd> / <kbd>Z</kbd> jump &nbsp; <kbd>R</kbd> restart room &nbsp; <kbd>G</kbd> ghost &nbsp; <kbd>M</kbd> sound &nbsp; <kbd>N</kbd> music</p>
       <p class="pad-keys">🎮 stick / D-pad move &nbsp; <b>A</b> jump &nbsp; <b>Y</b> restart room &nbsp; <b>X</b> ghost</p>
       <p class="touch-keys">◀ ▶ move &nbsp; <b>JUMP</b> (hold to go higher) &nbsp; ↻ restart room</p>${dev ? '<p class="hint">Dev mode — results are not saved. 🛠 bottom-left opens the menu.</p>' : ''}
       <button id="start">Start</button>
@@ -6433,6 +6746,7 @@ function boot() {
       <div class="board" id="board">${API ? '<p class="hint">loading leaderboard…</p>' : (STATIC_HOST ? '<p class="hint">📡 Offline mode: leaderboards are back when the server is — your result is saved on this device.</p>' : '<p class="hint">Leaderboards need the server: <code>cd server && npm start</code>, then open http://127.0.0.1:8787</p>')}</div>
       <pre class="share">${text}</pre>
       <div class="menu-row">${practice ? '' : `<button id="share">${canShareSheet() ? 'Share result' : 'Copy result'}</button>`}${game.mapRun && game.mapRun.result === result ? '<button id="deathMap" class="secondary">📸 Death map</button>' : ''}${API && !practice ? '<button id="challengeBtn" class="secondary">⚔ Challenge a friend</button>' : ''}</div>
+      ${API ? '<div class="menu-row"><button id="watchBest" class="secondary">👑 Watch today\'s best runs</button></div>' : ''}
       <div class="menu-row"><button id="again" class="secondary">${practice ? 'Practice again' : 'Practice run'}</button>${API ? '<button id="pastLevels" class="secondary">Past levels</button>' : ''}${endlessButton()}</div>
       ${statsHtml()}
       ${badgesHtml()}
@@ -6458,6 +6772,18 @@ function boot() {
       });
     }
     overlay.querySelector('#again').addEventListener('click', () => startRun(true));
+    const wbb = overlay.querySelector('#watchBest');
+    if (wbb) {
+      wbb.addEventListener('click', () => {
+        wbb.disabled = true;
+        Promise.all([0, 1, 2].map((i) => fastestRun(i))).then((runs) => {
+          if (game.state !== 'results') return;
+          const queue = runs.map((run, i) => (run ? { i, run } : null)).filter(Boolean);
+          if (!queue.length) { wbb.textContent = '👑 no runs to watch yet'; return; }
+          startWatch(queue, () => { game.level = roomAt(0); game.state = 'results'; showResults(result, practice); });
+        });
+      });
+    }
     const mapBtn = overlay.querySelector('#deathMap');
     if (mapBtn) mapBtn.addEventListener('click', () => shareDeathMap(mapBtn, game.mapRun, practice).catch(() => { mapBtn.textContent = '⚠ could not make the map'; }));
     const cb = overlay.querySelector('#challengeBtn');
