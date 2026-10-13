@@ -27,16 +27,25 @@
   </main>
   <script>
     // This page is the permanent link: the game itself is served from a tunnel whose
-    // address can change, so look up the current one and go there.
+    // address can change, so look up the current one and go there.  If the server is
+    // away (the Mac asleep, the tunnel restarting), play the offline copy in game/
+    // instead: same game, rooms built in the browser, no leaderboards.
     (async () => {
       const msg = document.getElementById('msg');
+      const offline = () => {
+        msg.textContent = 'The game server is away — opening offline mode…';
+        setTimeout(() => location.replace('game/' + location.search), 600);
+      };
       try {
         const { url } = await (await fetch('url.json?' + Date.now(), { cache: 'no-store' })).json();
-        const ok = await fetch(url + '/api/health', { mode: 'cors' }).then((r) => r.ok).catch(() => null);
-        if (ok === false) throw new Error('down');
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 6000);
+        const ok = await fetch(url + '/api/health', { mode: 'cors', signal: ctl.signal }).then((r) => r.ok).catch(() => false);
+        clearTimeout(timer);
+        if (!ok) return offline(); // the health check answers with CORS: no answer = down
         location.replace(url + '/' + location.search);
       } catch {
-        msg.innerHTML = 'The game is restarting — try again in a minute. <a href="">Retry</a>';
+        offline();
       }
     })();
   </script>
